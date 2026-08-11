@@ -8,7 +8,7 @@ Extend agy-bridge beyond Claude Code to other MCP-capable coding agents:
 ## Key insight: zero server changes
 
 agy-bridge speaks standard MCP over stdio — the protocol is client-agnostic,
-and any MCP client can run `npx -y agy-bridge` today. The only "Claude"
+and any MCP client can run `npx -y @bto-labs/agy-bridge` today. The only "Claude"
 reference in `src/` is a backend model name in the `adversarial_review`
 routing chain (`src/tools.ts`), not a client assumption.
 
@@ -48,7 +48,7 @@ Config snippets (verified current as of June 2026):
 **Codex CLI**
 
 ```bash
-codex mcp add agy-bridge --command npx --args -y agy-bridge
+codex mcp add agy-bridge --command npx --args -y @bto-labs/agy-bridge
 ```
 
 or `~/.codex/config.toml` (project scope: `.codex/config.toml`):
@@ -56,13 +56,13 @@ or `~/.codex/config.toml` (project scope: `.codex/config.toml`):
 ```toml
 [mcp_servers.agy-bridge]
 command = "npx"
-args = ["-y", "agy-bridge"]
+args = ["-y", "@bto-labs/agy-bridge"]
 ```
 
 **Cursor** — `~/.cursor/mcp.json` (project scope: `.cursor/mcp.json`):
 
 ```json
-{ "mcpServers": { "agy-bridge": { "command": "npx", "args": ["-y", "agy-bridge"] } } }
+{ "mcpServers": { "agy-bridge": { "command": "npx", "args": ["-y", "@bto-labs/agy-bridge"] } } }
 ```
 
 **Windsurf** — `~/.codeium/windsurf/mcp_config.json`: same JSON shape as Cursor.

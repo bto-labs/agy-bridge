@@ -20,7 +20,7 @@ const commonShape = {
     .string()
     .optional()
     .describe(
-      'Override the model (exact name from `agy models`, e.g. "Gemini 3.1 Pro (High)"). ' +
+      'Override the model (CLI ID or display name from `agy models`, e.g. "gemini-3.1-pro-high" or "Gemini 3.1 Pro (High)"). ' +
         "Normally omit — the tool routes automatically.",
     ),
 };
