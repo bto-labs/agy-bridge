@@ -1,8 +1,26 @@
+const MODEL_NAME_RE = /^(Gemini|Claude|GPT)[- ]/i;
+
+function looksLikeModelName(line: string): boolean {
+  return MODEL_NAME_RE.test(line);
+}
+
 export function parseModels(output: string): string[] {
-  return output
-    .split("\n")
-    .map((l) => l.trim().replace(/\s*\(current\)$/, ""))
-    .filter((l) => l.length > 0);
+  const models = new Set<string>();
+  for (const raw of output.split("\n")) {
+    const line = raw.trim().replace(/\s*\(current\)$/, "");
+    if (line.length === 0) continue;
+
+    if (line.includes("\t")) {
+      const [rawId, rawDisplay] = line.split("\t", 2);
+      const cliId = rawId?.trim() ?? "";
+      const displayName = rawDisplay?.trim() ?? "";
+      if (cliId && looksLikeModelName(cliId)) models.add(cliId);
+      if (displayName && looksLikeModelName(displayName)) models.add(displayName);
+    } else if (looksLikeModelName(line)) {
+      models.add(line);
+    }
+  }
+  return [...models];
 }
 
 export interface ResolveOptions {

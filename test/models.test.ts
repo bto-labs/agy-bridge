@@ -6,6 +6,12 @@ Gemini 3.5 Flash (High)
 Gemini 3.1 Pro (High)
 `;
 
+// agy 1.1.12+ prints `cli-id<TAB>Display Name` and a leading status line.
+const LISTING_V2 = `Fetching available models...
+gemini-3.6-flash-high	Gemini 3.6 Flash (High)
+gemini-3.1-pro-high	Gemini 3.1 Pro (High)
+`;
+
 describe("parseModels", () => {
   it("returns one trimmed model per non-empty line", () => {
     expect(parseModels(LISTING)).toEqual([
@@ -20,6 +26,22 @@ describe("parseModels", () => {
       "Claude Opus 4.6 (Thinking)",
     ]);
   });
+
+  it("parses two-column agy output with a leading status line", () => {
+    expect(parseModels(LISTING_V2)).toEqual([
+      "gemini-3.6-flash-high",
+      "Gemini 3.6 Flash (High)",
+      "gemini-3.1-pro-high",
+      "Gemini 3.1 Pro (High)",
+    ]);
+  });
+
+  it("strips ' (current)' from the display column", () => {
+    expect(parseModels("gemini-3.1-pro-high\tGemini 3.1 Pro (High) (current)\n")).toEqual([
+      "gemini-3.1-pro-high",
+      "Gemini 3.1 Pro (High)",
+    ]);
+  });
 });
 
 describe("ModelRegistry.resolve", () => {
@@ -31,6 +53,16 @@ describe("ModelRegistry.resolve", () => {
 
   it("uses explicit model when available", async () => {
     const r = await registry(LISTING).resolve({ explicit: "Gemini 3.1 Pro (High)", chain: [] });
+    expect(r.model).toBe("Gemini 3.1 Pro (High)");
+  });
+
+  it("accepts a CLI ID as explicit model", async () => {
+    const r = await registry(LISTING_V2).resolve({ explicit: "gemini-3.1-pro-high", chain: [] });
+    expect(r.model).toBe("gemini-3.1-pro-high");
+  });
+
+  it("accepts a display name as explicit model with two-column output", async () => {
+    const r = await registry(LISTING_V2).resolve({ explicit: "Gemini 3.1 Pro (High)", chain: [] });
     expect(r.model).toBe("Gemini 3.1 Pro (High)");
   });
 
