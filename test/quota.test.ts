@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   parseResetDuration,
   formatDuration,
@@ -6,6 +9,9 @@ import {
   QuotaError,
   CooldownRegistry,
   DEFAULT_COOLDOWN_SEC,
+  slugifyModel,
+  defaultCooldownDeps,
+  type CooldownStoreDeps,
 } from "../src/quota.js";
 
 const LOG_429 =
@@ -65,30 +71,139 @@ describe("QuotaError", () => {
   });
 });
 
+/** In-memory fake store — no real filesystem I/O, for fast unit tests. */
+function fakeCooldownDeps(): CooldownStoreDeps {
+  const store = new Map<string, number>();
+  return {
+    async readDeadline(model) {
+      return store.get(model);
+    },
+    async writeDeadline(model, untilMs) {
+      store.set(model, untilMs);
+    },
+  };
+}
+
 describe("CooldownRegistry", () => {
-  it("marks a model as cooling until its reset time", () => {
+  it("marks a model as cooling until its reset time", async () => {
     let now = 1_000_000;
-    const reg = new CooldownRegistry(() => now);
-    reg.set("ModelA", 60);
-    expect(reg.cooling("ModelA")).toBe(true);
-    expect(reg.cooling("ModelB")).toBe(false);
+    const reg = new CooldownRegistry(() => now, fakeCooldownDeps());
+    await reg.set("ModelA", 60);
+    expect(await reg.cooling("ModelA")).toBe(true);
+    expect(await reg.cooling("ModelB")).toBe(false);
     now += 61_000;
-    expect(reg.cooling("ModelA")).toBe(false);
+    expect(await reg.cooling("ModelA")).toBe(false);
   });
 
-  it("falls back to a default cooldown when reset time is unknown", () => {
+  it("falls back to a default cooldown when reset time is unknown", async () => {
     let now = 0;
-    const reg = new CooldownRegistry(() => now);
-    reg.set("ModelA", undefined);
+    const reg = new CooldownRegistry(() => now, fakeCooldownDeps());
+    await reg.set("ModelA", undefined);
     now = (DEFAULT_COOLDOWN_SEC - 1) * 1000;
-    expect(reg.cooling("ModelA")).toBe(true);
+    expect(await reg.cooling("ModelA")).toBe(true);
     now = (DEFAULT_COOLDOWN_SEC + 1) * 1000;
-    expect(reg.cooling("ModelA")).toBe(false);
+    expect(await reg.cooling("ModelA")).toBe(false);
   });
 
-  it("describes remaining cooldown", () => {
-    const reg = new CooldownRegistry(() => 0);
-    reg.set("ModelA", 3661);
-    expect(reg.describe("ModelA")).toBe("1h1m1s");
+  it("describes remaining cooldown", async () => {
+    const reg = new CooldownRegistry(() => 0, fakeCooldownDeps());
+    await reg.set("ModelA", 3661);
+    expect(await reg.describe("ModelA")).toBe("1h1m1s");
   });
+
+  it("never lets a shorter cooldown shorten an existing longer one", async () => {
+    let now = 0;
+    const reg = new CooldownRegistry(() => now, fakeCooldownDeps());
+    await reg.set("ModelA", 3600); // a 1h daily-quota cooldown lands first
+    await reg.set("ModelA", 60); // a racing 1m rate-limit cooldown must not win
+    now = 61_000; // the 1m cooldown would have expired by now...
+    expect(await reg.cooling("ModelA")).toBe(true); // ...but the 1h one is still active
+  });
+
+  it("does let a longer cooldown extend an existing shorter one", async () => {
+    let now = 0;
+    const reg = new CooldownRegistry(() => now, fakeCooldownDeps());
+    await reg.set("ModelA", 60);
+    await reg.set("ModelA", 3600);
+    now = 61_000;
+    expect(await reg.cooling("ModelA")).toBe(true);
+  });
+
+  it("shares cooldown state across independently constructed registries on the same store", async () => {
+    const deps = fakeCooldownDeps();
+    const writer = new CooldownRegistry(() => 0, deps);
+    const reader = new CooldownRegistry(() => 0, deps);
+    await writer.set("ModelA", 60);
+    expect(await reader.cooling("ModelA")).toBe(true);
+  });
+});
+
+describe("slugifyModel", () => {
+  it("lowercases and collapses non-alphanumeric runs into a single dash", () => {
+    expect(slugifyModel("Gemini 3.1 Pro (High)")).toBe("gemini-3-1-pro-high");
+  });
+
+  it("trims leading and trailing dashes", () => {
+    expect(slugifyModel("--weird--")).toBe("weird");
+  });
+
+  it("falls back to a stable name for an all-symbol input", () => {
+    expect(slugifyModel("???")).toBe("model");
+  });
+});
+
+describe("defaultCooldownDeps", () => {
+  function withTempDir(fn: (dir: string) => Promise<void>) {
+    return async () => {
+      const dir = mkdtempSync(path.join(tmpdir(), "agy-bridge-cooldown-test-"));
+      try {
+        await fn(dir);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  it(
+    "returns undefined for a model with no recorded deadline",
+    withTempDir(async (dir) => {
+      const deps = defaultCooldownDeps(dir);
+      expect(await deps.readDeadline("Gemini 3.1 Pro (High)")).toBeUndefined();
+    }),
+  );
+
+  it(
+    "round-trips a deadline through the real filesystem",
+    withTempDir(async (dir) => {
+      const deps = defaultCooldownDeps(dir);
+      const until = Date.now() + 60_000;
+      await deps.writeDeadline("Gemini 3.1 Pro (High)", until);
+      const read = await deps.readDeadline("Gemini 3.1 Pro (High)");
+      expect(read).toBeDefined();
+      expect(Math.abs(read! - until)).toBeLessThan(1500); // mtime resolution varies by fs
+    }),
+  );
+
+  it(
+    "shares state across two independent deps instances pointed at the same directory",
+    withTempDir(async (dir) => {
+      const a = defaultCooldownDeps(dir);
+      const b = defaultCooldownDeps(dir);
+      const until = Date.now() + 60_000;
+      await a.writeDeadline("ModelA", until);
+      const read = await b.readDeadline("ModelA");
+      expect(read).toBeDefined();
+      expect(Math.abs(read! - until)).toBeLessThan(1500);
+    }),
+  );
+
+  it(
+    "creates the target directory tree if it doesn't exist yet",
+    withTempDir(async (dir) => {
+      const nested = path.join(dir, "nested", "cooldowns");
+      const deps = defaultCooldownDeps(nested);
+      await deps.writeDeadline("ModelA", Date.now() + 1000);
+      expect(await deps.readDeadline("ModelA")).toBeDefined();
+    }),
+  );
 });

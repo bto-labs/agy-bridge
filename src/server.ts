@@ -49,8 +49,8 @@ export function createToolHandler(
       let used: string | undefined;
 
       for (const model of resolution.models) {
-        if (model && cooldowns.cooling(model)) {
-          attempts.push(`${model}: quota cooldown, ${cooldowns.describe(model)} left`);
+        if (model && (await cooldowns.cooling(model))) {
+          attempts.push(`${model}: quota cooldown, ${await cooldowns.describe(model)} left`);
           continue;
         }
         try {
@@ -63,7 +63,7 @@ export function createToolHandler(
           break;
         } catch (err) {
           if (err instanceof QuotaError && model) {
-            cooldowns.set(model, err.resetSeconds);
+            await cooldowns.set(model, err.resetSeconds);
             attempts.push(
               `${model}: quota exhausted${err.resetText ? ` (resets in ${err.resetText})` : ""}`,
             );
@@ -118,7 +118,7 @@ export function createServer(): McpServer {
   });
   const cooldowns = new CooldownRegistry();
 
-  const server = new McpServer({ name: "agy-bridge", version: "0.5.0" });
+  const server = new McpServer({ name: "agy-bridge", version: "0.6.0" });
   for (const tool of TOOLS) {
     server.registerTool(
       tool.name,

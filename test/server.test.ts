@@ -2,9 +2,22 @@ import { describe, it, expect } from "vitest";
 import { createToolHandler } from "../src/server.js";
 import { ModelRegistry } from "../src/models.js";
 import { TOOLS } from "../src/tools.js";
-import { CooldownRegistry } from "../src/quota.js";
+import { CooldownRegistry, type CooldownStoreDeps } from "../src/quota.js";
 import type { Config } from "../src/config.js";
 import type { ChildHandle, RunnerDeps } from "../src/runner.js";
+
+/** In-memory fake store — keeps tests off the real filesystem. */
+function fakeCooldownDeps(): CooldownStoreDeps {
+  const store = new Map<string, number>();
+  return {
+    async readDeadline(model) {
+      return store.get(model);
+    },
+    async writeDeadline(model, untilMs) {
+      store.set(model, untilMs);
+    },
+  };
+}
 
 const cfg: Config = {
   agyPath: "agy",
@@ -66,7 +79,7 @@ function handlerFor(
   name: string,
   f: ReturnType<typeof fakeDeps>,
   overrides: Partial<Config> = {},
-  cooldowns = new CooldownRegistry(),
+  cooldowns = new CooldownRegistry(Date.now, fakeCooldownDeps()),
 ) {
   return createToolHandler(
     TOOLS.find((t) => t.name === name)!,
@@ -146,7 +159,7 @@ describe("createToolHandler", () => {
 
   it("skips cooled-down models on subsequent calls without spawning them", async () => {
     const f = fakeDeps(["Gemini 3.5 Flash (Medium)"]);
-    const cooldowns = new CooldownRegistry();
+    const cooldowns = new CooldownRegistry(Date.now, fakeCooldownDeps());
     const handler = handlerFor("web_lookup", f, {}, cooldowns);
     await handler({ query: "first" });
     expect(f.runs).toHaveLength(2);

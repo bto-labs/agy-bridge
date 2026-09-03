@@ -89,9 +89,17 @@ On first use the bridge runs `agy models` (cached for the process lifetime) and 
 agy never surfaces quota exhaustion in print mode — it silently retries the 429 until its print-timeout, then exits 0 with empty output, which used to look like an indefinite hang. The bridge now watches each run's log file (via `--log-file`) and on `RESOURCE_EXHAUSTED (code 429)`:
 
 1. kills the agy process group immediately (no waiting out the timeout),
-2. parses the reset time ("Resets in 4h24m") into an in-process cooldown registry,
+2. parses the reset time ("Resets in 4h24m") into a cooldown record,
 3. retries the same prompt on the next model in the tool's chain,
 4. skips cooled-down models on all subsequent calls until their quota resets.
+
+Cooldowns are shared **across every concurrent agy-bridge process** on a host, not just
+within one — the bridge runs as a separate process per MCP client/session, and several can
+share the same underlying account's quota. Each model's cooldown deadline is recorded as the
+mtime of a small marker file under `~/.cache/agy-bridge/cooldowns/`, so one process's quota
+hit immediately protects every other concurrent process from retrying the same
+already-exhausted model. A cooldown is never shortened by a later, shorter-duration write
+(e.g. a per-minute rate limit racing a per-day quota on the same model) — only extended.
 
 Failovers are annotated in the response footer (`failover: <model>: quota exhausted (resets in 4h24m)`). Only when every candidate is exhausted does the call fail — in seconds, with reset times listed — instead of hanging.
 
