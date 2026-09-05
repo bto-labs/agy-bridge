@@ -109,6 +109,53 @@ describe("createToolHandler", () => {
     expect(f.runs[0].args).not.toContain("--model");
   });
 
+  it("follow_up honors an explicit model override", async () => {
+    const f = fakeDeps();
+    await handlerFor(
+      "follow_up",
+      f,
+    )({
+      session_id: "abc",
+      question: "more?",
+      model: "Gemini 3.1 Pro (High)",
+    });
+    const args = f.runs[0].args;
+    expect(args).toContain("--conversation");
+    expect(args).toContain("abc");
+    expect(args[args.indexOf("--model") + 1]).toBe("Gemini 3.1 Pro (High)");
+  });
+
+  it("follow_up treats an empty-string model the same as no model", async () => {
+    const f = fakeDeps();
+    await handlerFor("follow_up", f)({ session_id: "abc", question: "more?", model: "" });
+    expect(f.runs[0].args).not.toContain("--model");
+  });
+
+  it("a stray session_id on a non-follow_up tool never bypasses model resolution", async () => {
+    const f = fakeDeps();
+    // Simulates what a follow_up-shaped args object would do if it ever
+    // reached a different tool's handler directly (the real MCP server
+    // guards this via schema stripping — this test guards the handler
+    // itself, independent of that).
+    await handlerFor("web_lookup", f)({ query: "docs", session_id: "spurious" });
+    expect(f.runs[0].args).toContain("--model");
+  });
+
+  it("follow_up rejects an explicit model that isn't available", async () => {
+    const f = fakeDeps();
+    const res = await handlerFor(
+      "follow_up",
+      f,
+    )({
+      session_id: "abc",
+      question: "more?",
+      model: "Not A Real Model",
+    });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as { text: string }).text).toContain("Not A Real Model");
+    expect(f.runs).toHaveLength(0);
+  });
+
   it("uses the per-tool timeout for --print-timeout", async () => {
     const f = fakeDeps();
     await handlerFor("web_lookup", f)({ query: "docs" });

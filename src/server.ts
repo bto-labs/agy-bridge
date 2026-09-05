@@ -36,13 +36,22 @@ export function createToolHandler(
       const timeoutSec =
         cfg.perToolTimeouts[tool.name] ?? (cfg.timeoutExplicit ? cfg.timeoutSec : tool.timeoutSec);
 
-      const resolution = conversationId
-        ? { models: [undefined], note: undefined }
-        : await registry.resolveChain({
-            explicit: args.model as string | undefined,
-            chain: tool.chain,
-            defaultModel: cfg.defaultModel,
-          });
+      const explicitModel = args.model as string | undefined;
+      // A follow_up with no explicit model continues the existing agy
+      // session unpinned — resolving one here would incorrectly inject
+      // AGY_DEFAULT_MODEL onto an established continuation. An explicit
+      // model, though, must be honored and validated like any other call.
+      // Scoped to the tool's own identity (not just "a session_id happened
+      // to be present") so this bypass can never trigger for a different
+      // tool, independent of whether the MCP layer above already strips it.
+      const resolution =
+        tool.name === "follow_up" && !explicitModel
+          ? { models: [undefined], note: undefined }
+          : await registry.resolveChain({
+              explicit: explicitModel,
+              chain: tool.chain,
+              defaultModel: cfg.defaultModel,
+            });
 
       const attempts: string[] = [];
       let result: RunResult | undefined;
@@ -118,7 +127,7 @@ export function createServer(): McpServer {
   });
   const cooldowns = new CooldownRegistry();
 
-  const server = new McpServer({ name: "agy-bridge", version: "0.6.0" });
+  const server = new McpServer({ name: "agy-bridge", version: "0.6.1" });
   for (const tool of TOOLS) {
     server.registerTool(
       tool.name,

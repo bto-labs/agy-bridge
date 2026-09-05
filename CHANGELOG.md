@@ -1,5 +1,22 @@
 # Changelog
 
+## @bto-labs/agy-bridge v0.6.1 - 2026-09-05
+
+### Fixed
+
+- `follow_up` now honors an explicit `model` override, validated against the
+  model registry like every other tool. Previously the schema advertised
+  `model` for `follow_up`, but the handler unconditionally discarded it
+  whenever a `session_id` was present, silently deferring to `agy`'s own
+  default routing (typically a cheaper, lower-tier model) even when a
+  specific model was explicitly requested.
+- `follow_up` with no explicit model still continues the existing agy
+  session unpinned, exactly as before — this only changes behavior when a
+  `model` is actually supplied.
+- The follow_up bypass is now scoped to the tool's own identity rather than
+  merely "a `session_id` is present," so it can never trigger for a
+  different tool.
+
 ## @bto-labs/agy-bridge v0.6.0 - 2026-09-03
 
 ### Added
